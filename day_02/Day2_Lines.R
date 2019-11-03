@@ -151,7 +151,7 @@ van_street_df %>%
   theme_map() +
   theme(plot.background=element_rect(fill="gray8")) 
 
-ggsave("day_02/output/Vancouver_Street_Map.png", width=16, height=12)
+ggsave("day_02/output/Vancouver_Street_Map.svg", width=16, height=12)
 
 
 
