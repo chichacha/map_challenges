@@ -1,0 +1,169 @@
+---
+title: "Day 4 Maple Tree Hexagon"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+## Hexagon Challenge
+I know there's geom_hex function in ggplot2, but I have no idea if I can use it with geom_sf...
+
+I'll use dataset from Vancouver Open Data library again.
+https://opendata.vancouver.ca/explore/dataset/street-trees/information/?disjunctive.species_name&disjunctive.common_name&disjunctive.height_range_id
+
+
+
+```{r}
+library(tidyverse)
+library(sf)
+library(ggthemes)
+library(here)
+library(osmdata)
+
+
+url <- "https://opendata.vancouver.ca/explore/dataset/street-trees/download/?format=geojson&disjunctive.species_name=true&disjunctive.common_name=true&disjunctive.height_range_id=true&refine.genus_name=ACER&timezone=America/Los_Angeles"
+download.file(url, destfile=str_c(here(),"/day_04/data/street_tree_acer.json"))
+
+
+maple_tree <- st_read("day_04/data/street_tree_acer.json")
+
+## There are 35784 maple trees, but looks like 5367 are missing geo_coordinates
+maple_tree <- maple_tree %>%
+  mutate(missing_geometry=st_is_empty(.))
+
+
+## Just generating colour palettes to use
+col_pal <- c("#F44336", "#E91E63", "#9C27B0", "#673AB7", "#3F51B5", "#2196F3", "#03A9F4", "#00BCD4", "#009688", "#4CAF50", "#8BC34A", "#CDDC39", "#FFEB3B", "#FFC107", "#FF9800", "#FF5722", "#795548", "#9E9E9E", "#607D8B") 
+
+col_pal %>% show_col()
+col_red_o_yellow <- colorRampPalette(col_pal[c(1,16,17,15,13)])(10)
+col_red_o_yellow %>% show_col()
+
+
+## Street Name where geo coordinates are missing from
+maple_tree %>%
+  filter(missing_geometry) %>%
+  as_tibble() %>%
+  count(on_street, sort=T) %>%
+  mutate(n=sqrt(n)) %>%
+  wordcloud2::wordcloud2(size=0.6, rotateRatio=0, fontFamily="Roboto Condensed",
+                         color=sample(col_red_o_yellow,size=500,replace=T),
+                         backgroundColor="gray8")
+
+## Which street has the most maple trees
+maple_tree %>%
+  #filter(missing_geometry) %>%
+  as_tibble() %>%
+  count(on_street, sort=T) #%>%
+  mutate(n=sqrt(n)) %>%
+  wordcloud2::wordcloud2(size=0.6, rotateRatio=0, fontFamily="Roboto Condensed",
+                         color=sample(col_red_o_yellow,size=500,replace=T),
+                         backgroundColor="gray8")
+
+## What types of maple tree is it? 
+  
+system.file("examples/t.png",package = "wordcloud2")  
+
+
+maple_tree %>%
+  #filter(!missing_geometry) %>%
+  as_tibble() %>% 
+  count(common_name, sort=T) %>% #glimpse()
+  mutate(n=sqrt(n)) %>%
+  wordcloud2::wordcloud2(size=0.6, rotateRatio=0, fontFamily="Roboto Condensed",
+                         color=sample(col_red_o_yellow,size=500,replace=T),
+                         backgroundColor = "grey8")
+
+?wordcloud2::wordcloud2
+
+
+## Prepping basemap
+
+map_bbox <- st_bbox(maple_tree)
+
+osmdata::available_tags("highway")
+base_map <- opq(bbox=map_bbox) %>% ## bild an overpass query
+  add_osm_feature(key="highway") %>%  
+  osmdata_sf() %>%
+  osm_poly2line() ## convert polygon shaped highway to line
+
+base_linemap <- base_map$osm_lines %>% filter(highway %in% c("residential","secondary","tetriary","primary"))
+
+
+```
+
+
+## Maple Trees as points
+
+```{r}
+
+maple_tree %>%
+  filter(!missing_geometry) %>%
+  ggplot() +
+  geom_sf(data=base_linemap, size=0.1, color="#ffffffde") +
+  geom_sf(aes(color=common_name), size=0.2) +
+  coord_sf() +
+  theme_map() +
+  scale_color_manual(values=colorRampPalette(col_red_o_yellow)(90), guide="none") +
+  theme(plot.background=element_rect("gray8"))
+
+ggsave("day_04/output/maple_tree_vancouver.png", width=16, height=9)
+xopen::xopen("day_04/output/maple_tree_vancouver.svg", app="google chrome")  
+
+## that's a lot of points.... so can i bin it?
+
+maple_tree <-maple_tree %>%
+  cbind(.,st_coordinates(maple_tree)) 
+
+maple_tree %>% glimpse()
+plot_hex_maple <- function(df) {
+  
+  cnt <- nrow(df)
+  
+  top_nhood <- df %>% count(neighbourhood_name, sort=T) %>% pull(neighbourhood_name)
+  top_nhood[1]
+
+  
+  df %>%
+  filter(!missing_geometry) %>%
+  #mutate(maple_f = fct_lump(fct_infreq(common_name),n=8, other_level="OTHER MAPLE TREES")) %>%
+  ggplot() +
+  geom_sf(data=base_linemap, size=0.1, color="#ffffff80") +
+  geom_hex(aes(x=X, y=Y), bins=45) +
+  coord_sf() +
+  theme_map(base_family="Roboto Condensed") +
+  scale_fill_gradient(low="#ffeb3b", high="#f44336", trans="sqrt") +
+  theme(plot.background=element_rect("gray8"),
+        plot.title=element_text(color="#ffffffde", size=24),
+        plot.subtitle=element_text(color="#ffffff80", size=16),
+        legend.background=element_rect("gray8"), 
+        legend.text=element_text(color="white"),
+        legend.title=element_text(color="white"),
+        strip.background = element_rect("gray1"),
+        strip.text = element_text(color="white", family="Roboto Condensed")) +
+  labs(title=str_c(cnt," ",str_to_title(paste(unique(df$common_name), collapse=" "))," Trees in Vancouver"),
+       subtitle=str_glue("Top Neighbourhood with {str_to_title(unique(df$common_name))} Tree: {top_nhood[1]}"),
+       caption="Data Source: https://opendata.vancouver.ca/")
+  
+}
+
+
+###  I should write function for below too....
+maple_tree %>% count(common_name, sort=T) %>% pull(common_name)
+plot_hex_maple(maple_tree %>% filter(common_name=="NORWAY MAPLE"))
+ggsave("day_04/output/maple_tree_norway_maple.svg", width=16, height=9)
+
+plot_hex_maple(maple_tree %>% filter(common_name=="RED MAPLE"))
+ggsave("day_04/output/maple_tree_red_maple.svg", width=16, height=9)
+
+plot_hex_maple(maple_tree %>% filter(common_name=="BOWHALL RED MAPLE"))
+ggsave("day_04/output/maple_tree_bowhall_red_maple.svg", width=16, height=9)
+
+
+
+```
+
+## 
+
+I wish I can categorize maple trees into smaller categories...
+I also wish I know which maple tree turns red vs yellow in the autumn
