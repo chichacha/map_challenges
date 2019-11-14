@@ -1,0 +1,13 @@
+tag-id,animal-id,animal-taxon,deploy-on-date,deploy-off-date,animal-ring-id,animal-sex,animal-taxon-detail,deploy-on-person,deployment-id,tag-manufacturer-name,tag-mass,tag-model,tag-serial-no
+48505480932,TERF03,Haliaeetus leucocephalus,,,,,Bald Eagle,,,Ecotone,30.0,Saker-H-LF GPS-GSM,48505480932
+48536497762,BACA01,Haliaeetus leucocephalus,2018-02-09 21:25:49.000,,629-28664 / BLUE/SILVER M2,,Bald Eagle,Myles Lamont,,Ecotone,30.0,Tringa-L1 GPS-GSM,48536497762
+48536491373,BACA02,Haliaeetus leucocephalus,2018-02-11 00:00:00.000,,629-28666  /  BLUE/SILVER N2,,Bald Eagle,Myles Lamont,,Ecotone,30.0,Tringa-L1 GPS-GSM,48536491373
+48505481127,TERF05,Haliaeetus leucocephalus,2018-02-14 00:00:00.000,,629-28667  /  BLUE/SILVER G3,,Bald Eagle,Myles Lamont,,Ecotone,30.0,Saker-H-LF GPS-GSM,48505481127
+48505480892,TERF04,Haliaeetus leucocephalus,2018-02-18 00:00:00.000,,0709-0197 / BLACK/YELLOW A1,,Bald Eagle,Myles Lamont,,Ecotone,30.0,Saker-H-LF GPS-GSM,48505480892
+48505481391,TERF01,Haliaeetus leucocephalus,2018-02-22 00:00:00.000,,,,Bald Eagle,Myles Lamont,,Ecotone,30.0,Saker-H-LF GPS-GSM,48505481391
+48536493978,BACA03,Haliaeetus leucocephalus,2018-12-04 00:00:00.000,,,,Bald Eagle,,BACA03,Ecotone,30.0,Tringa-L1 GPS-GSM,48536493978
+48505481307,TERF02,Haliaeetus leucocephalus,2018-12-12 00:00:00.000,,,,Bald Eagle,Myles Lamont,TERF02,Ecotone,30.0,Saker-H-LF GPS-GSM,48505481307
+48536497230,TEUS03,Haliaeetus leucocephalus,2019-01-08 00:00:00.000,,,f,BALD EAGLE,MYLES LAMONT,48536497230,Ecotone,30.0,L1 TRINGA GPS-GSM,
+48570876691,BETA02,Haliaeetus leucocephalus,2019-03-19 00:00:00.000,,,f,,Myles Lamont,,Ecotone,40.0,L1 CREX,48570876691
+,BETA03,Haliaeetus leucocephalus,,,,,,,,,,,
+,BETA04,Haliaeetus leucocephalus,,,,,,,,,,,

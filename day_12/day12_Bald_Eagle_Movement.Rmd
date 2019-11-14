@@ -1,0 +1,117 @@
+---
+title: "Day 12 Movement"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+## Movebank Site (https://www.movebank.org/)
+
+Site says below! 
+"Movebank is a free, online database of animal tracking data hosted by the Max Planck Institute of Animal Behavior. We help animal tracking researchers to manage, share, protect, analyze, and archive their data. The animal tracking data in Movebank belongs to researchers all over the world who choose whether and how to share their data with the public. "
+
+
+## Obtain the Data
+
+I couldn't figure out if there's way to download directly from the site, but for day 12 challenge, I thought the data set is perfect candidates for mapping movement! 
+I searched data points near Vancouver, BC, Canada and found datasets on eagle! 
+
+Study Name:  Bald Eagle (Haliaeetus leucocephalus) in British Columbia
+I downloaded CSV from the site. 
+
+```{r}
+
+library(tidyverse)
+library(sf)
+library(ggthemes)
+library(leaflet)
+library(skimr)
+library(janitor)
+library(lubridate)
+library(tmap)
+library(ggforce)
+
+fs::dir_ls("day_12")
+
+########### Prepping Colour Palettes
+## Sticking to same colour themes I've been using... 
+col_pal <- c("#F44336", "#E91E63", "#9C27B0", "#673AB7", "#3F51B5", "#2196F3", "#03A9F4", "#00BCD4", "#009688", "#4CAF50", "#8BC34A", "#CDDC39", "#FFEB3B", "#FFC107", "#FF9800", "#FF5722", "#795548", "#9E9E9E", "#607D8B") 
+
+eagle <- read_csv("day_12/Bald Eagle (Haliaeetus leucocephalus) in British Columbia.csv")
+
+## contains tag_id along with deployed date
+eagle_ref <- read_csv("day_12/Bald Eagle (Haliaeetus leucocephalus) in British Columbia-reference-data.csv")
+
+var_name <-eagle %>% skim()
+## variable name with at least 1 entry in the column
+v <-var_name %>% filter(stat=="missing") %>% filter(value<nrow(eagle)) %>%
+  pull(variable)
+
+eagle <- eagle %>% 
+  select(v) %>% clean_names()
+  
+eagle <-eagle %>%
+  rename(long=location_long, lat=location_lat) %>%
+  mutate(name = fct_reorder(comments,timestamp,min,.desc=F))
+
+eagle_sf <- eagle %>%
+  st_as_sf(coords=c("long","lat"))
+
+#install.packages('spDataLarge', repos='https://nowosad.github.io/drat/',type='source')
+
+eagle_bbox <- st_bbox(eagle_sf)
+
+eagle_stats <- eagle %>% group_by(name) %>%
+  summarise(first_seen=min(timestamp),
+            last_seen=max(timestamp),
+            n_obs = n(),
+            max_lat=max(lat),
+            min_lat=min(lat),
+            max_long=max(long),
+            min_long=min(long)) %>%
+  mutate(descr=str_glue("Last Seen on {format(last_seen,'%Y %b %e %a')}
+                        Observed {n_obs} times
+                        since {format(first_seen,'%Y %b %e %a')}"))
+
+eagle %>%
+  arrange(timestamp) %>%
+  left_join(eagle_stats %>% select(name, descr)) %>%
+  ggplot() +
+  geom_point(aes(x=long, y=lat, color=name), size=0.5) +
+  geom_path(aes(x=long,y=lat,color=name), size=0.7) +
+  geom_mark_hull(size=0.1, 
+                    aes(color=name, label=name, description=descr,
+                        x=long, y=lat),
+                    con.size=0.5, con.colour="#00000080", con.linetype=1,
+                    label.family="Roboto Condensed",
+                    label.fontsize=10,
+                 expand=unit(1,"mm"), radius=unit(1,"mm"))+
+  theme_map() +
+  scale_color_manual(values=col_pal, guide="none") +
+  coord_sf(xlim=eagle_bbox[c(1,3)], ylim=eagle_bbox[c(2,4)]) 
+
+ggsave("day_12/Eagle_Movement.png", width=16, height=9)
+
+
+### Create Linestring SF
+eagle_sf_line <-eagle_sf %>% 
+  group_by(name) %>% 
+  arrange(timestamp) %>% 
+  summarise(n=n(),do_union=FALSE) %>% ## How do I create path in order?
+  st_cast("LINESTRING")
+
+
+factpal <- colorFactor(col_pal, eagle_sf$name)
+eagle_sf_line %>%
+  leaflet() %>%
+  addProviderTiles(provider=providers$CartoDB.DarkMatter) %>%
+  addCircles(data=eagle_sf,color = ~factpal(name), weight=2, opacity=0.7, stroke=F) %>%
+  addPolylines(color = ~factpal(name), stroke=T, weight=1, opacity=1)
+
+
+
+
+```
+
+
+
