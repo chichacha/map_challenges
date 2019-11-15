@@ -126,11 +126,11 @@ local_b_comb <- bind_cols(local_b,packing_sf)
 
 ## Jigsaw Puzzle Pieces
 local_b_comb %>% ggplot() +
-  geom_sf(aes(geometry=geom_shape + geom_pack), size=0.5, fill="#2BA468") +
+  geom_sf(aes(geometry=geom_shape + geom_pack), size=0.5, fill="#2BA468", color="white") +
   geom_sf_text(aes(geometry=geom_shape + geom_pack, label=name), 
-               family="Roboto Condensed", size=5, color="#ffffff30", angle=45) +
+               family="Roboto Condensed", size=5, color="#00000030", angle=45) +
   theme_map()
-ggsave("day_14/Boundary_as_Jigsaw_Scattered.png", width=16, height=16)
+ggsave("day_14/Boundary_as_Jigsaw_Scattered.png", width=9, height=9)
 
 
 local_b_comb %>% ggplot() +
