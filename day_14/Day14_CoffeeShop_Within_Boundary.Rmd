@@ -1,0 +1,150 @@
+---
+title: "Day 14 - Boundary"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+# Boundary! 
+
+Thanks for @vb_jens for letting me know the R package to pull data from Vancouver Open Data Portal! AND using VancouvR package, I can find new datasets more easily! (Um... For a while, I was downloading from one by one... )
+
+```{r}
+
+library(tidyverse)
+library(VancouvR)  ## making it so much easier to access Vancouver Open Data Portal! It's not on CRAN yet, but you can download from below. 
+## https://mountainmath.github.io/VancouvR/index.html 
+library(ggthemes)
+library(sf)
+library(lwgeom) ## lightweight geom
+library(packcircles)
+library(osmdata)
+library(transformr)  ## install_github("thomasp85/transformr")
+library(tweenr)
+
+col_pal_22 <- c("#F44336", "#EA235C", "#B2249A", "#7D31B4", "#5543B6", "#3664C6", "#1C98F3", "#03A9F4", "#00B9D8", "#00A09D", "#2BA468", "#66B74D", "#9DCA45", "#D4DE39", "#FFEB3B", "#FFC70E", "#FFA301", "#FF7213", "#C55632", "#836960", "#95999B", "#607D8B") 
+
+col_22 <- c("#1BA3C6", "#29B2C0", "#2EBAB2", "#27B597", "#28AB74", "#3DA551", "#61A534", "#A2B627", "#CDBA21", "#EEB720", "#F8A11A", "#F47F17", "#EB581C", "#E33730", "#F64971", "#FB6B97", "#EF72AD", "#DA6DB9", "#BB6ABF", "#966EC1", "#7274BF", "#4F7CBA")
+
+
+```
+
+
+## Boundary Related Datasets?
+
+Gathering the dataset (ingredients)
+
+```{r}
+
+# You can search the database portal with ease
+## So is there boundary related data? --> YES
+search_cov_datasets("boundary") %>%
+  select(dataset_id, title, theme, records_count )
+
+## local-area-boundary, block-outlines (4632 shapes - details), city-boundary (the most outer)
+
+city_outer <- get_cov_data("city-boundary", format="geojson")
+city_bbox <- st_bbox(city_outer)
+
+local_b <- get_cov_data("local-area-boundary", format="geojson")
+block <- get_cov_data("block-outlines", format="geojson")
+
+
+###  I want to know how many coffee shop each boundary has...
+coffee <- osmdata::opq(city_bbox) %>%
+  add_osm_feature(key="amenity", value="cafe") %>%
+  osmdata_sf()
+
+coffee_pt <- coffee$osm_points %>%
+  select(name, brand, addr.street, cuisine)
+
+coffee_pt <-st_crop(coffee_pt, local_b)
+
+
+
+
+```
+
+
+## Experimenting....
+
+```{r}
+
+coffee_pt %>% count(name, sort=T) ## missing 68 coffee shop names... boo
+coffee_pt %>% count(brand, sort=T)
+
+## Give me list of coffee shop names excluding the one without name
+coffee_pt %>%as_tibble() %>% count(name, sort=T) %>%
+  mutate(n=sqrt(n)) %>%
+  filter(!is.na(name)) %>%
+  wordcloud2::wordcloud2(rotateRatio=0,
+                         color=sample(colorRampPalette(c("brown","black","green"))(10),
+                                      size=400,replace=T),
+                         fontFamily="Roboto Condensed")
+
+coffee_pt %>% ggplot() +
+  geom_sf(data=local_b, fill="#ffffff20", size=0.5) +
+  geom_sf(data=block, fill="#ffffff00", color="#00000030", size=0.4) +
+  geom_sf(aes(color=fct_lump(fct_infreq(name),n=5)), shape=19, size=1) +
+  geom_sf_text(data=local_b, aes(label=name, geometry=geo_point_2d), 
+               family="Roboto Condensed") +
+  theme_map() +
+  scale_color_gdocs(guide="none")
+
+local_b %>% mutate(geom = st_contains(coffee_pt$geometry, geometry))
+
+st_contains(coffee_pt$geometry, city_outer$geometry)
+st_contains(city_outer$geometry,coffee_pt$geometry)
+
+## function to count number of coffee shop in geom region
+coffee_shop_cnt = function(geom){
+  st_crop(coffee_pt$geometry,geom) %>%
+    length()
+}
+
+local_b <- local_b %>% mutate(cafe_cnt=map_int(geometry, coffee_shop_cnt),
+                              area = as.numeric(st_area(geometry)),
+                              local_bbox = map(geometry, st_bbox),
+                              geom_shape = geometry-st_centroid(geometry),
+                              b_circle = lwgeom::st_minimum_bounding_circle(geom_shape),
+                              b_radius = sqrt(st_area(b_circle)/pi))
+
+
+
+## 22 Local Area Overlapped
+local_b %>% ggplot() +
+  geom_sf(aes(geometry=geom_shape), fill="#ffffff10", size=1) +
+  theme_map()
+
+
+packing <- circleProgressiveLayout(st_area(local_b$b_circle)) 
+packing_sf <- packing %>% st_as_sf(coords=c("x","y")) %>% 
+  rename(geom_pack=geometry) %>% select(-radius)
+
+local_b_comb <- bind_cols(local_b,packing_sf)
+
+
+## Jigsaw Puzzle Pieces
+local_b_comb %>% ggplot() +
+  geom_sf(aes(geometry=geom_shape + geom_pack), size=0.5, fill="#2BA468") +
+  geom_sf_text(aes(geometry=geom_shape + geom_pack, label=name), 
+               family="Roboto Condensed", size=5, color="#ffffff30", angle=45) +
+  theme_map()
+ggsave("day_14/Boundary_as_Jigsaw_Scattered.png", width=16, height=16)
+
+
+local_b_comb %>% ggplot() +
+  geom_sf(aes(fill=reorder(name, cafe_cnt)), size=0.5, fill="#2BA468", color="white") +
+  geom_sf(data=block, size=0.1, color="#ffffff80", fill="#ffffff00") +
+  geom_sf_text(aes(label=name), 
+               family="Roboto Condensed", size=5, color="#00000080", angle=45) +
+  theme_map() 
+
+ggsave("day_14/Boundary_as_Jigsaw.png", width=16, height=9)
+
+
+
+
+
+```
+
