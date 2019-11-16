@@ -1,0 +1,185 @@
+---
+title: "Day 15 - Names"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+# Names 
+
+I came across wikipedia site explaining etymology of Japan prefecture...
+### https://en.wikipedia.org/wiki/List_of_Japanese_prefectural_name_etymologies
+
+So I wanted to place a story on the map itself...
+I found amazing collection of geojson map on Exploratory site!
+https://exploratory.io/map
+
+So I've downloaded geojson file for Japan. 
+
+
+## Get list of ingredients and packages together... 
+
+
+```{r}
+
+## List packages I need
+
+library(tidyverse)
+library(sf)
+library(ggthemes)
+library(ggforce)
+library(janitor)
+library(rvest)
+library(tidytext)
+library(ggrepel)
+
+col_47 <- c("#3F51B5", "#3763C5", "#2F75D5", "#2787E5", "#1F96F3", "#179BF3", "#10A0F3", "#08A5F3", "#02AAF1", "#01AFE8", "#01B4E0", "#00B9D8", "#00B7CA", "#00ADB6", "#00A3A2", "#00998E", "#0D9A7E", "#21A06F", "#34A761", "#48AD52", "#59B34E", "#6AB84D", "#7ABD4B", "#8BC34A", "#9CC945", "#ADD041", "#BED63C", "#CFDC39", "#DCE039", "#E9E43A", "#F6E83A", "#FFE736", "#FFDC28", "#FFD11B", "#FFC60D", "#FFBB06", "#FFB004", "#FFA602", "#FF9B00", "#FF8C05", "#FF7B0E", "#FF6A17", "#FF5920", "#FC5226", "#F94D2B", "#F64830", "#F44336")
+
+rm(col_pal)
+col_47 %>% scales::show_col()
+
+
+
+
+download.file("https://download2.exploratory.io/maps/jp_prefs.zip","day_15/jp_prefs.zip")
+unzip("day_15/jp_prefs.zip", exdir="day_15")
+jp_pref <- st_read("day_15/jp_prefs.geojson") %>% clean_names() %>%
+  mutate_if(is.factor, as.character)
+
+## To Do Fu Ken
+jp_pref <- jp_pref %>%
+  mutate(pref_type = case_when(
+    str_detect(name_jp, "都$") ~ "Metropolis",
+    str_detect(name_jp, "道$") ~ "Circuit",
+    str_detect(name_jp, "府$") ~ "Urban Prefecture",
+    str_detect(name_jp, "県$") ~ "Prefecture"
+  ))
+
+
+
+tmp <- read_html("https://en.wikipedia.org/wiki/Prefectures_of_Japan") %>%
+  html_nodes("table") 
+
+jp_pref_detail <-tmp[[4]] %>%
+  html_table() %>%
+  clean_names() %>%
+  rename(name_jp=kanji)
+
+rm(tmp)
+
+tmp <- read_html("https://en.wikipedia.org/wiki/List_of_Japanese_prefectural_name_etymologies") %>%
+  html_nodes("table")
+
+jp_pref_etym <- tmp[[3]] %>%
+  html_table() %>%
+  clean_names() %>%
+  select(name_jp=kanji, origin_and_meaning=origin_and_meaning_of_name)
+
+rm(tmp)
+
+
+jp_pref_comb <- jp_pref %>%
+  inner_join(jp_pref_detail, by="name_jp") %>%
+  mutate_at(c("population","area","density"), ~as.numeric(str_remove_all(.,","))) %>%
+  mutate(iso_num = as.numeric(str_remove(iso,"(JP-)"))) %>%
+  inner_join(jp_pref_etym, by="name_jp") %>%
+  mutate(geom_bbox = map(geometry,st_bbox),
+         geom_centroid=st_centroid(geometry)) %>%
+  mutate(x = map_dbl(geom_centroid,1),
+         y = map_dbl(geom_centroid,2)) %>%
+  arrange(desc(y))  ## I want to assign colour by north to south
+
+jp_pref_comb$color <- col_47
+
+
+## Quick Plot to Check
+jp_pref_comb %>%
+  ggplot() +
+  geom_sf(aes(fill=color), color="white", size=0.1) +
+  theme_map() +
+  scale_fill_identity()
+
+
+
+
+
+```
+
+## Analysis on Word Usage & Visualizing It
+
+
+```{r}
+
+## experimental.... I wanted to know how the unnest token handles japanese character part!
+jp_pref_etym2 <- jp_pref_etym %>%
+  unnest_tokens(word,origin_and_meaning) %>%
+  anti_join(stop_words)
+
+wc_df <-jp_pref_etym2 %>% count(name_jp, word, sort=T) %>%
+  bind_tf_idf(word,name_jp,n) %>%
+  inner_join(jp_pref_comb %>% as_tibble() %>% select(name_jp,name,name_jp_short,color,x,y)) %>%
+  #filter(!name_jp_short==word) %>%
+  #filter(!str_to_lower(name)==word) %>%
+  filter(n>1) %>% 
+  arrange(-y,-x)
+
+?str_pad
+wc_df %>%
+  ggplot() +
+  geom_sf(data=jp_pref_comb, aes(fill=str_c(color,"70"), color=str_c(color,"90")), size=0.1) +
+  geom_text_repel(aes(x=x,y=y, color=color,label=str_pad(word,width=1,side="both"), size=tf_idf),
+                   family="Hiragino Sans W8", segment.size=0.1, min.segment.length=0) +
+  scale_color_identity() +
+  scale_size_area(guide="none") +
+  scale_fill_identity() +
+  theme_map(base_family="Hiragino Sans W2") +
+  labs(title="Japanese prefectural name etymologies",
+       caption="Data from Wikipedia: https://en.wikipedia.org/wiki/List_of_Japanese_prefectural_name_etymologies")
+
+ggsave("day_15/Japan_Prefecture_Etymologies_TfIdf.png",width=16, height=9)
+
+wc_df %>%
+  group_by(color,name_jp,x,y) %>%
+  arrange(tf_idf,n) %>%
+  summarise(word_list=str_wrap(paste(word,collapse=" "),width=20)) %>%
+  ggplot() +
+  geom_sf(data=jp_pref_comb, aes(fill=str_c(color,"70"), color=str_c(color,"90")), size=0.1) +
+  geom_point(aes(x=x,y=y,color=color)) +
+  geom_text_repel(aes(x=x,y=y,color=color, label=word_list),
+                  family="Hiragino Sans W8",
+                  min.segment.length=0) +
+  scale_color_identity() +
+  scale_fill_identity() +
+  theme_map()
+
+ggsave("day_15/Japan_Prefecture_Etymologies_TfIdf2.png",width=16, height=9)
+
+jp_pref_comb %>%
+  filter(name!="Okinawa") %>% ## Sorry Okinawa... but I'm just trying to fit better
+  ggplot() +
+  geom_sf(aes(fill=str_c(color,"70"), color=str_c(color,"90")), size=0.1) +
+  geom_mark_circle(aes(x=x,y=y,group=name_jp,
+                       color=color, 
+                       label=name_jp, 
+                       description=origin_and_meaning),
+                   label.family="Hiragino Sans W3",
+                   label.fontsize=6,
+                   label.minwidth=unit(70,"mm"),
+                   con.cap=unit(1,"mm"),
+                   con.colour="grey",
+                   expand=unit(1,"mm"),n=10) +
+  scale_color_identity() +
+  scale_size_area(guide="none") +
+  scale_fill_identity() +
+  theme_map() 
+
+ggsave("day_15/Japan_Prefecture_Etymologies2.png",width=16*2, height=9*2)
+
+wc_df[,c(2,6)]  
+
+wordcloud2::wordcloud2(wc_df[,c(2,6)] ,rotateRatio=0,
+                       color=wc_df$color, size=0.5,
+                       fontFamily="Hiragino Sans W4")
+
+```
+
