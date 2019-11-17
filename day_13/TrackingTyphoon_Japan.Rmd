@@ -1,0 +1,423 @@
+---
+title: "Typhoon"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+# Data Sources 
+
+## Name of Typhoon - 140 names and recycles 
+https://www.jma.go.jp/jma/kishou/know/typhoon/1-5.html
+
+## Meta Data
+https://www.data.jma.go.jp/fcd/yoho/typhoon/position_table/format_csv.html
+
+Just a reminder to myself...  I always get confused...
+緯度 = Latitude  = Horizontal Lines 
+経度 = Longitude = Vertical Lines 
+
+## Historical Typhoon
+you can find 2001 to 2019 here.
+https://www.data.jma.go.jp/fcd/yoho/typhoon/position_table/table2001.csv
+https://www.data.jma.go.jp/fcd/yoho/typhoon/position_table/table2019.csv
+
+```{r}
+
+library(tidyverse)
+library(sf)
+library(ggthemes)
+library(gganimate)
+library(lwgeom)
+library(rvest)
+library(lubridate)
+library(scales)
+library(janitor)
+library(ggrepel)
+library(patchwork)
+library(ggforce)
+
+col_pal <- c("#F44336", "#E91E63", "#9C27B0", "#673AB7", "#3F51B5", "#2196F3", "#03A9F4", "#00BCD4", "#009688", "#4CAF50", "#8BC34A", "#CDDC39", "#FFEB3B", "#FFC107", "#FF9800", "#FF5722", "#795548", "#9E9E9E", "#607D8B") 
+
+col_pal %>% scales::show_col()
+col_pal[c(2,5,7,9,11,4,1)] -> col_7 
+col_pal[c(5,6,8,9,10,11,12,14,15,16,2,4)] -> col_12
+
+
+
+
+```
+
+
+
+```{r}
+
+
+test <- read_csv("https://www.data.jma.go.jp/fcd/yoho/typhoon/position_table/table2019.csv")
+## Hmmm... it doesn't like Japanese charactered column names? 
+
+column_titles <- c("yr", "mo", "day", "hr", "t_id", "t_name", "t_class", "lat", "long", "hpa", "knot", "kt50_dir", "kt50_major", "kt50_minor", "kt30_dir", "kt30_major", "kt30_minor", "landing")
+test <- read_csv("https://www.data.jma.go.jp/fcd/yoho/typhoon/position_table/table2019.csv",
+                 skip=1, 
+                 col_names=column_titles,
+                 col_types = "ddddccdddddddddddd")
+
+
+jp_pref <- st_read("day_15/jp_prefs.geojson") %>% clean_names() %>%
+  mutate_if(is.factor, as.character)
+
+world <- st_read("https://raw.githubusercontent.com/johan/world.geo.json/master/countries.geo.json")
+
+japan <- world %>% filter(id=="JPN")
+
+typhoon_name <- read_html("https://www.jma.go.jp/jma/kishou/know/typhoon/1-5.html") %>%
+  html_nodes("table") %>%
+  html_table() 
+typhoon_name <- typhoon_name[[1]] 
+
+names(typhoon_name) <- c("idx","country","t_name","t_name_jp","meaning")
+
+typhoon_name %>% count(country, sort=T)
+typhoon_name <- typhoon_name %>% mutate(t_name=str_to_upper(t_name),
+                                        country = str_replace(country,"（朝鮮民主主義人民共和国）", ""),
+                                        country = fct_reorder(country, idx,min),
+                                        t_name_f = fct_reorder(t_name,idx,min))
+
+typhoon_name %>%
+  ggplot(aes(x=idx,y=as.numeric(country))) +
+  geom_path(size=0.5, linetype=3, alpha=0.6) +
+  geom_point(aes(color=country), size=5, alpha=0.5) +
+  geom_text(aes(label=str_c(idx,". ",t_name,"\n   ", t_name_jp)), 
+            hjust=0, lineheight=0.8, size=3, fontface="bold",
+            family="Hiragino Sans W2") +
+  theme_minimal(base_family="Hiragino Sans W3") +
+  scale_x_continuous(breaks=NULL) +
+  scale_y_reverse(breaks=c(1:14), labels=unique(typhoon_name$country)) +
+  scale_color_manual(values=colorRampPalette(colors=col_pal[c(1:17)])(14),
+                     guide="none") +
+  expand_limits(x=c(0,150)) +
+  labs(x="",y="", title="台風の名前")
+
+typhoon_name_comb <- typhoon_name %>%
+  left_join(typhoon_df %>% group_by(t_name) %>% 
+              summarise(record_cnt=n(), 
+                        cnt=n_distinct(t_id), 
+                        first_one = min(date), 
+                        last_one=max(date),
+                        landing=sum(landing))) %>%
+  replace_na(list(cnt=0, record_cnt=0, landing=0, last_one=""))
+
+typhoon_name_comb %>%
+  ggplot(aes(x=idx,y=as.numeric(country))) +
+  geom_path(size=0.5, linetype=3, alpha=0.6) +
+  geom_point(aes(color=country, size=cnt, alpha=landing)) +
+  geom_text(aes(label=str_c(idx,".",t_name,"\n   ", t_name_jp)), 
+            hjust=0, lineheight=0.8, size=3, fontface="bold",
+            family="Hiragino Sans W2") +
+  theme_minimal(base_family="Hiragino Sans W3") +
+  scale_x_continuous(breaks=NULL) +
+  scale_y_reverse(breaks=c(1:14), labels=unique(typhoon_name$country)) +
+  scale_color_manual(values=colorRampPalette(colors=col_pal[c(1:17)])(14),
+                     guide="none") +
+  expand_limits(x=c(0,150)) +
+  labs(x="",y="", title="台風の名前") +
+  scale_size_continuous(range=c(1,7), guide="none") +
+  scale_alpha_continuous(range=c(0.1,0.9), guide="none")
+
+ggsave("day_13/NameOfTyphoon.png", width=16, height=9)
+
+  
+
+## Download data from 2001 to 2019 from website, then put them into data frame
+typhoon <- tibble(
+  prefix = "https://www.data.jma.go.jp/fcd/yoho/typhoon/position_table/table",
+  year = c(2001:2019),
+  suffix = ".csv"
+) %>% mutate(url = str_c(prefix,year,suffix)) %>%
+  select(url) %>%
+  mutate(data = map(url,read_csv, 
+                       skip=1, 
+                       col_names=column_titles,
+                       col_types = "ddddccdddddddddddd"))
+
+typhoon_df <- typhoon %>% select(-url) %>% unnest(data)
+
+## convert to date
+typhoon_df <- typhoon_df %>% mutate(date=ymd(str_c(yr,"-",mo,"-",day)),
+                                    mo_name=month(date,label=T, abbr=F),
+                                    wday_name = wday(date,label=T))
+
+col_pal %>% show_col()
+
+typhoon_df %>% filter(landing*t_class>2) %>% group_by()
+## Colour by Year
+typhoon_df %>%
+  ggplot(aes(x=long,y=lat)) +
+  geom_sf(data=japan, color="black", fill="#00000080", aes(x=NULL, y=NULL), size=0.01) +
+  geom_path(aes(group=t_id), size=0.1) +
+  geom_point(aes(color=factor(t_class),size=t_class*landing), alpha=0.1) +
+  geom_text_repel(data= .%>% filter(landing*t_class>2) %>% 
+                                    group_by(yr,t_name) %>%
+                                    summarise(long=mean(long),lat=mean(lat),
+                                              t_class=max(t_class)), 
+                  aes(label=t_name),
+                  size=3, family="Roboto Condensed", color="gray8",
+                  nudge_x=10, min.segment.length=0) +
+  theme_map() +
+  scale_color_manual(values=col_pal[c(7:1)], name="Class") +
+  scale_alpha_continuous(range=c(0.1,1), breaks=c(0,1)) +
+  scale_size_continuous(range=c(1,5), guide="none")+
+  facet_wrap(~yr) +
+  theme(legend.justification = c(0, 0), legend.position=c(1,0))
+
+ggsave("day_13/Typhoon_Path_By_Year_2001_2019.png", width=16, height=9)
+
+
+
+## Coloured by Week of Day by Month
+typhoon_df %>%
+  #filter(yr<=2003) %>%
+  ggplot(aes(x=long,y=lat)) +
+  geom_sf(data=japan, aes(geometry=geometry,x=NULL, y=NULL), fill="#000000de", color="#000000", size=0.1) +
+  geom_path(aes(group=t_id,color=wday_name), size=0.5, alpha=0.9) +
+  geom_text(aes(x=110,y=50,label=mo_name, alpha=n,
+                color=wday_name), size=6, hjust=0, vjust=1, 
+            family="Roboto Condensed",
+            data = typhoon_df %>% count(wday_name,mo_name)) +
+  #geom_point(aes(alpha=landing), size=1) +
+  theme_void(base_family="Roboto Condensed") +
+  #theme_minimal() +
+  scale_color_manual(values=col_pal[c(2,5,7,9,11,4,1)], name="Day of Week") +
+  #scale_alpha_continuous(range=c(0,1), breaks=c(0,1), guide="none") +
+  scale_alpha_continuous(range=c(0.1,0.3), guide="none") +
+  facet_wrap(~mo_name) +
+  theme(strip.text = element_blank(),
+        legend.position="bottom", legend.box = "horizontal") +
+  guides(colour=guide_legend(override.aes = list(size=3, label=""),nrow=1)) +
+  labs(title=str_glue("Path of Typhoons between {min(typhoon_df$yr)} - {max(typhoon_df$yr)}"),
+       caption="Data Source: Japan Meteological Agency (https://www.data.jma.go.jp/fcd/yoho/typhoon/index.html)")
+
+ggsave("day_13/Tracking_Typhoon_White_Bg.png", width=16, height=9)
+
+typhoon_df %>%
+  ggplot(aes(x=long,y=lat)) +
+  geom_sf(data=japan, aes(geometry=geometry,x=NULL, y=NULL), fill="#ffffffde", color="#ffffff", size=0.1) +
+  geom_path(aes(group=t_id,color=mo_name), size=0.5, alpha=0.9) +
+  geom_text(aes(x=110,y=50,label=str_c(yr), alpha=n,
+                color=mo_name), size=6, hjust=0, vjust=1, 
+            family="Roboto Condensed",
+            data = typhoon_df %>% count(mo_name,yr)) +
+  #geom_point(aes(alpha=landing), size=1) +
+  theme_void(base_family="Roboto Condensed") +
+  #theme_minimal() +
+  scale_color_manual(values=col_12, name="Month") +
+  #scale_alpha_continuous(range=c(0,1), breaks=c(0,1), guide="none") +
+  scale_alpha_continuous(range=c(0.1,0.3), guide="none") +
+  facet_wrap(~yr) +
+  theme(strip.text = element_blank(),
+        legend.position="bottom", legend.box = "horizontal",
+        legend.text=element_text(color="white"),
+        plot.background=element_rect(fill="gray8")) +
+  guides(colour=guide_legend(override.aes = list(size=3, label=""),nrow=1))+
+  labs(title=str_glue("Path of Typhoons between {min(typhoon_df$yr)} - {max(typhoon_df$yr)}"),
+       caption="Data Source: Japan Meteological Agency (https://www.data.jma.go.jp/fcd/yoho/typhoon/index.html)")
+
+ggsave("day_13/Tracking_Typhoon_Black_Bg.png", width=16, height=9)
+xopen::xopen("day_13/tracking_typhoon.png")
+
+
+### Hmmm Below doesn't look right...
+p<-typhoon_df %>%
+  ggplot(aes(x=long,y=lat)) +
+  geom_sf(data=japan, aes(geometry=geometry,x=NULL, y=NULL), fill="#ffffffde", color="#ffffff", size=0.1) +
+  geom_path(aes(group=t_id,color=mo_name), size=0.5, alpha=0.9) +
+  geom_point(aes(alpha=landing, color=mo_name), size=1) +
+  theme_void(base_family="Roboto Condensed") +
+  scale_color_manual(values=col_12, name="Month") +
+  scale_alpha_continuous(range=c(0,1), breaks=c(0,1), guide="none") +
+  theme(
+        legend.position="bottom", legend.box = "horizontal",
+        legend.text=element_text(color="white"),
+        legend.background = element_rect(fill="gray8"),
+        panel.background=element_rect(fill="gray8"),
+        plot.background=element_rect(fill="gray8"),
+        plot.margin = unit(c(0,0,0,0),"mm")) +
+  guides(colour=guide_legend(override.aes = list(size=3, label=""),nrow=1))  +
+  expand_limits(xlim=c(70,200), ylim=c(0,70)) +
+  labs(title = 'Year: {frame_time}', x = '', y = '') +
+  transition_time(yr) +
+  ease_aes('linear')
+
+?animate
+animate(p, 100, 10, renderer = gifski_renderer(width=800, height=480))
+
+
+
+## I want to turn data frame so that each row = unique typhoon
+typhoon_sf  <- typhoon_df %>%
+  st_as_sf(coords=c("long","lat")) %>%
+  group_by(t_id,t_name) %>% 
+  arrange(date) %>% 
+  summarise(n=n(),do_union=FALSE,  ## tricks to create a path?
+            date_start=min(date),date_end=max(date),
+            landing=max(landing)) %>% 
+  st_cast("LINESTRING") %>%
+  mutate(geom_length=st_length(geometry),
+         geom_shape = geometry - lwgeom::st_startpoint(geometry),
+         geom_shape2 = geometry - lwgeom::st_endpoint(geometry),
+         start_point = lwgeom::st_startpoint(geometry),
+         end_point = lwgeom::st_endpoint(geometry)) %>%
+  ungroup()
+
+## geom_shape - shape of typhoon if the starting point is same
+
+typhoon_sf <- typhoon_sf %>% 
+  left_join(typhoon_name %>% select(t_name, country, idx, t_name_f))
+
+typhoon_sf %>% glimpse()
+
+st_crs(typhoon_sf) <- st_crs(jp_pref)
+
+
+## Function to Plot Selected Year
+plot_typhoon <- function(yr_selected) {
+  p_main <- typhoon_sf %>%
+    arrange(desc(geom_length)) %>%
+    mutate(yr_start = year(date_start)) %>%
+    filter(yr_start == yr_selected) %>%
+    ggplot() +
+    geom_sf(data = japan, fill = "grey20", size = 0.01) +
+    geom_sf(aes(geometry = geometry, color = month(date_start, label = T), linetype = factor(landing)), size = 0.5) +
+    geom_text(aes(x = Inf, y = Inf, label = str_c(yr_start, ": ", n, " typhoons")),
+      data = . %>% as_tibble() %>% count(yr_start),
+      hjust = 1, vjust = 1, size = 5, color = "#00000080", family = "Roboto Condensed"
+    ) +
+    geom_sf(aes(geometry = start_point, color = month(date_start, label = T)), size = 1, shape = 16) +
+    geom_sf(aes(geometry = end_point, color = month(date_start, label = T)), shape = 18, size = 2) +
+    geom_sf_text(aes(geometry = end_point, label = t_name),
+      size = 4, angle = -45, family="Roboto Condensed", color="gray20",
+      data = . %>% filter(landing == 1), hjust = 0, vjust = 0
+    ) +
+    scale_color_manual(values = col_12, name = "Month", limits = month.abb) +
+    scale_linetype_manual(values = c(3, 1), name = "Sold Line If Landed in Japan") +
+    theme_map(base_family = "Roboto Condensed") +
+    facet_wrap(~yr_start) +
+    theme(
+      strip.text = element_blank(),
+      legend.position = "bottom", legend.box = "horizontal"
+    ) +
+    guides(colour = guide_legend(override.aes = list(size = 3, label = "", shape = 19), nrow = 1)) 
+
+  p_sub1 <- typhoon_df %>%
+    filter(yr == yr_selected) %>%
+    group_by(yr, t_id, t_name) %>%
+    summarise(
+      date_start = min(date),
+      date_end = max(date),
+      landed = sum(landing) > 0,
+      dummy = 1
+    ) %>%
+    ungroup() %>%
+    mutate(mo_name = month(date_start, label = T)) %>%
+    ggplot(aes(x = mo_name, y = dummy)) +
+    geom_text(aes(x = 0, y = -3, label = str_glue("{yr}\n{total} total\n{landed} landed")),
+      data = . %>% group_by(yr) %>% summarise(total = sum(dummy), landed = sum(landed)),
+      lineheight = 0.8, family = "Roboto Condensed"
+    ) +
+    geom_col(color = "white", aes(fill = mo_name, alpha = as.numeric(landed))) +
+    coord_polar(theta = "x") +
+    theme_map() +
+    scale_fill_manual(values = col_12, name = "Month", limits = month.abb, guide = "none") +
+    scale_x_discrete(breaks = month.abb, limits = month.abb) +
+    scale_alpha_continuous(range = c(0.3, 1), guide = "none", limits=c(0,1)) +
+    expand_limits(y = -3)
+  
+  p_sub2<-typhoon_df %>%
+  filter(yr==yr_selected) %>%
+  ggplot() +
+  geom_sf(data=japan, fill="gray30", size=0.01)+
+  geom_link2(aes(x=long,y=lat, group=t_id,size=t_class, color=month(date,label=T)), alpha=0.3) +
+  theme_map() +
+  scale_size_continuous(limits=c(0,7), breaks=c(0:7), range=c(0,7))+
+  scale_color_manual(values = col_12, name = "Month", limits = month.abb, guide = "none") 
+  
+  p_sub3<-typhoon_sf %>%
+  filter(year(date_start)==yr_selected) %>%
+  mutate(mo_name=month(date_start,label=T),
+         t_id=fct_reorder(t_id,date_start,min,.desc=T),
+         t_no = row_number(date_start)) %>%
+  as_tibble() %>%
+  ggplot() +
+  geom_segment(aes(x=date_start,xend=date_end,y=t_id,yend=t_id, color=mo_name), size=5) +
+  geom_text(aes(x=date_start, y=t_id, hjust=ifelse(month(date_start)>=7,1,0),
+                label=str_c(t_no,". ",t_name," ", format(date_start,"%b %e %a" )," - ",format(date_end,"%b %e %a"))), 
+            family="Roboto Condensed") +
+  theme_map()+
+  scale_color_manual(values = col_12, name = "Month", limits = month.abb, guide = "none") +
+  expand_limits(x=c(ymd(str_c(yr_selected,"01-01"),ymd(str_c(yr_selected+1,"02-15")))))
+  
+  p_main + p_sub3 + plot_layout(nrow=1, widths=c(2,1))
+ 
+}
+
+plot_typhoon(2018)
+ggsave(str_c("day_13/","2018","_TyphoonDetails.png"),width=16, height=9)
+plot_typhoon(2001)
+ggsave(str_c("day_13/","2001","_TyphoonDetails.png"),width=16, height=9)
+
+plot_typhoon(2004)
+ggsave(str_c("day_13/","2004","_TyphoonDetails.png"),width=16, height=9)
+
+plot_typhoon(2008)
+ggsave(str_c("day_13/","2008","_TyphoonDetails.png"),width=16, height=9)
+
+## How do i plot then save ?
+c(2001:2019) %>%
+  map(.,plot_typhoon)
+
+
+
+## facet by country of typhoon name
+typhoon_sf %>% ggplot() +
+  geom_sf(aes(color=month(date_start, label=T))) +
+  facet_wrap(~country) +
+  scale_color_manual(values=col_12, name="Month Typhoon was born") +
+  theme_map(base_family="Hiragino Sans W6") +
+  theme(legend.position="bottom", legend.box = "horizontal") +
+  guides(colour=guide_legend(override.aes = list(size=3, label="", shape=19),nrow=1))
+
+
+typhoon_sf %>%
+  ggplot() +
+  geom_sf(aes(color=geom_length)) +
+  theme_map() +
+  scale_color_viridis_c(guide="none")
+
+typhoon_sf <-typhoon_sf %>%
+  ungroup() %>%
+  mutate(yr_diff=year(date_end)-year(date_start)) %>%
+  mutate(md_start = ymd(str_c(2019,month(date_start),day(date_start),sep="-")),
+         md_end = ymd(str_c(yr_diff+2019,month(date_end),day(date_end),sep="-"))) 
+
+typhoon_sf %>% as_tibble() %>% filter(yr_diff==1)
+
+typhoon_sf%>%
+  ggplot(aes(x=md_start, y=t_name)) +
+  geom_segment(aes(xend=md_end,yend=t_name, 
+                   color=month(date_start,label=T), size=geom_length)) +
+  geom_text(aes(label=t_name), color="#ffffff90", hjust=0, size=3) +
+  scale_color_manual(values=col_12, name="Month") +
+  scale_size_continuous(range=c(2,5), guide="none") +
+  scale_y_discrete(breaks=NULL) +
+  theme_minimal()
+  
+
+
+
+
+
+
+```
+
+
+
